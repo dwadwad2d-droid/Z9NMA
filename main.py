@@ -292,6 +292,9 @@ class RobloxCommunityAnalyzer:
             members = self.scraper.get_community_members(community_id)
             self.log_message(f"Found {len(members)} community members")
             
+            # Display member list immediately
+            self.display_member_list(members)
+            
             # Analyze member wealth
             self.update_status("💰 Analyzing member wealth...", 0.5)
             wealth_data = self.scraper.analyze_member_wealth(members, self.update_progress)
@@ -305,14 +308,20 @@ class RobloxCommunityAnalyzer:
             self.update_status("🔍 Searching for Discord server...", 0.9)
             discord_info = self.discord_finder.find_discord_server(community_info)
             
+            discord_matches = []
             if discord_info:
-                self.log_message(f"Found Discord server: {discord_info['invite']}")
+                invite_url = discord_info.get('invite_url', discord_info.get('invite', 'Unknown'))
+                self.log_message(f"Found Discord server: {invite_url}")
+                self.discord_text.delete("1.0", "end")
+                self.discord_text.insert("1.0", f"🔍 Discord server found: {invite_url}\n\nSearching for user matches...\n\n")
+                
                 # Match Discord users
                 discord_matches = self.discord_finder.match_discord_users(wealth_data, discord_info)
                 self.display_discord_matches(discord_matches)
             else:
                 self.log_message("No Discord server found in community social links")
-                self.discord_text.insert("end", "No Discord server found in community social links.")
+                self.discord_text.delete("1.0", "end")
+                self.discord_text.insert("1.0", "❌ No Discord server found in community social links.\n\nChecked:\n- Community description\n- Social media links\n- Community details\n\nNo Discord invite links were discovered.")
             
             self.update_status("✅ Analysis completed successfully!", 1.0)
             self.log_message("Analysis completed successfully")
@@ -334,11 +343,28 @@ class RobloxCommunityAnalyzer:
             self.is_analyzing = False
             self.analyze_button.configure(state="normal")
             self.stop_button.configure(state="disabled")
+            
+            # Reset scraper stop flag for next analysis
+            if self.scraper:
+                self.scraper.stop_analysis = False
     
-    def update_progress(self, current: int, total: int):
+    def update_progress(self, current: int, total: int, user_info: dict = None):
         """Update progress during member analysis"""
         progress = 0.5 + (current / total) * 0.3  # Between 0.5 and 0.8
-        self.update_status(f"💰 Analyzing wealth... ({current}/{total})", progress)
+        percentage = int((current / total) * 100)
+        
+        if user_info:
+            username = user_info.get('username', 'Unknown')
+            total_value = user_info.get('total_value', 0)
+            self.update_status(f"💰 Analyzing {username}... ({current}/{total} - {percentage}%)", progress)
+            
+            # Log every user being analyzed
+            self.log_message(f"Analyzed: {username} - {total_value:,} R$ ({len(user_info.get('limiteds', []))} limiteds)")
+            
+            # Update leaderboard in real-time for any user (not just wealthy ones)
+            self.root.after_idle(self.update_leaderboard_partial, user_info)
+        else:
+            self.update_status(f"💰 Analyzing wealth... ({current}/{total} - {percentage}%)", progress)
     
     def extract_community_id(self, url: str) -> str:
         """Extract community ID from URL"""
@@ -370,6 +396,28 @@ Social Links:
         self.info_text.delete("1.0", "end")
         self.info_text.insert("1.0", text)
     
+    def display_member_list(self, members: List[Dict]):
+        """Display community member list immediately"""
+        text = "👥 COMMUNITY MEMBERS\n" + "="*40 + "\n\n"
+        text += f"Total Members: {len(members)}\n\n"
+        
+        for i, member in enumerate(members[:50], 1):  # Show first 50
+            user = member.get('user', {})
+            username = user.get('username', 'Unknown')
+            user_id = user.get('userId', 'Unknown')
+            role = member.get('role', {}).get('name', 'Member')
+            
+            text += f"{i:2d}. {username} (ID: {user_id})\n"
+            text += f"     Role: {role}\n"
+            text += f"     Profile: https://www.roblox.com/users/{user_id}/profile\n\n"
+        
+        if len(members) > 50:
+            text += f"... and {len(members) - 50} more members\n"
+        
+        # Update the leaderboard tab initially with member list
+        self.leaderboard_text.delete("1.0", "end")
+        self.leaderboard_text.insert("1.0", text)
+    
     def display_leaderboard(self, leaderboard: List[Dict]):
         """Display wealth leaderboard"""
         text = "🏆 WEALTH LEADERBOARD (Top 50)\n" + "="*60 + "\n\n"
@@ -384,6 +432,40 @@ Social Links:
         
         self.leaderboard_text.delete("1.0", "end")
         self.leaderboard_text.insert("1.0", text)
+    
+    def update_leaderboard_partial(self, user_info: Dict):
+        """Update leaderboard with new user info in real-time"""
+        try:
+            current_text = self.leaderboard_text.get("1.0", "end")
+            
+            # If this is the first analysis entry, create header
+            if "🏆 ANALYSIS IN PROGRESS" not in current_text:
+                header = "🏆 ANALYSIS IN PROGRESS (Live Updates)\n" + "="*60 + "\n"
+                header += "Users are being analyzed in real-time. Wealthy users will appear here:\n\n"
+                self.leaderboard_text.delete("1.0", "end")
+                self.leaderboard_text.insert("1.0", header)
+            
+            # Add new user info (show all users with details)
+            total_value = user_info.get('total_value', 0)
+            limiteds_count = len(user_info.get('limiteds', []))
+            
+            # Show user with wealth indicator
+            if total_value > 0:
+                user_line = f"💰 {user_info['username']:<20} | {total_value:>10,} R$ | {limiteds_count:>3} limiteds\n"
+                if user_info.get('limiteds'):
+                    user_line += f"     📦 Items: {', '.join(user_info['limiteds'][:3])}\n"
+            else:
+                user_line = f"👤 {user_info['username']:<20} | {total_value:>10,} R$ | {limiteds_count:>3} limiteds\n"
+            
+            if user_info.get('profile_url'):
+                user_line += f"     🔗 Profile: {user_info['profile_url']}\n"
+            user_line += "\n"
+            
+            self.leaderboard_text.insert("end", user_line)
+            self.leaderboard_text.see("end")
+            
+        except Exception as e:
+            self.log_message(f"Error updating leaderboard: {e}", "ERROR")
     
     def display_discord_matches(self, matches: List[Dict]):
         """Display Discord user matches"""
@@ -407,6 +489,14 @@ Social Links:
         self.is_analyzing = False
         self.update_status("⏹️ Analysis stopped by user", 0)
         self.log_message("Analysis stopped by user")
+        
+        # Re-enable controls immediately
+        self.analyze_button.configure(state="normal")
+        self.stop_button.configure(state="disabled")
+        
+        # Stop the scraper if it exists
+        if self.scraper:
+            self.scraper.stop_analysis = True
     
     def export_results(self):
         """Export analysis results to JSON"""

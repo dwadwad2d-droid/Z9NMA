@@ -18,6 +18,7 @@ class RobloxScraper:
         self.cookie = cookie
         self.session = requests.Session()
         self.user_agent = UserAgent()
+        self.stop_analysis = False  # Flag to stop analysis
         
         # Setup session headers
         self.session.headers.update({
@@ -237,6 +238,11 @@ class RobloxScraper:
         total_members = len(members)
         
         for i, member in enumerate(members):
+            # Check if analysis should be stopped
+            if self.stop_analysis:
+                print("Analysis stopped by user")
+                break
+                
             try:
                 user_id = member.get('user', {}).get('userId')
                 username = member.get('user', {}).get('username')
@@ -260,18 +266,20 @@ class RobloxScraper:
                 # Get user profile info
                 profile_url = f"https://www.roblox.com/users/{user_id}/profile"
                 
-                wealth_data.append({
+                user_info = {
                     'user_id': user_id,
                     'username': username,
                     'total_value': total_value,
                     'limiteds': limited_names,
                     'limited_count': len(limiteds),
                     'profile_url': profile_url
-                })
+                }
                 
-                # Update progress
+                wealth_data.append(user_info)
+                
+                # Update progress with user info for real-time display
                 if progress_callback:
-                    progress_callback(i + 1, total_members)
+                    progress_callback(i + 1, total_members, user_info)
                 
                 # Rate limiting
                 time.sleep(self.rate_limit_delay)
