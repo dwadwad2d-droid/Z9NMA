@@ -295,9 +295,19 @@ class RobloxCommunityAnalyzer:
             # Display member list immediately
             self.display_member_list(members)
             
-            # Analyze member wealth
-            self.update_status("💰 Analyzing member wealth...", 0.5)
+            # Analyze member wealth with high-speed processing
+            self.update_status("🚀 Starting high-speed wealth analysis...", 0.5)
+            self.log_message("Using concurrent processing for maximum speed")
+            
+            import time
+            start_time = time.time()
             wealth_data = self.scraper.analyze_member_wealth(members, self.update_progress)
+            end_time = time.time()
+            
+            analysis_time = end_time - start_time
+            members_analyzed = len(wealth_data)
+            self.log_message(f"⚡ Analysis completed in {analysis_time:.2f} seconds")
+            self.log_message(f"📊 Analyzed {members_analyzed} members ({members_analyzed/analysis_time:.1f} members/second)")
             
             # Create leaderboard
             self.update_status("📊 Creating wealth leaderboard...", 0.8)
@@ -356,15 +366,21 @@ class RobloxCommunityAnalyzer:
         if user_info:
             username = user_info.get('username', 'Unknown')
             total_value = user_info.get('total_value', 0)
-            self.update_status(f"💰 Analyzing {username}... ({current}/{total} - {percentage}%)", progress)
+            limiteds_count = len(user_info.get('limiteds', []))
             
-            # Log every user being analyzed
-            self.log_message(f"Analyzed: {username} - {total_value:,} R$ ({len(user_info.get('limiteds', []))} limiteds)")
+            # Show high-speed processing status
+            self.update_status(f"🚀 Processed {username}... ({current}/{total} - {percentage}%) [CONCURRENT]", progress)
+            
+            # Log users with wealth
+            if total_value > 0:
+                self.log_message(f"💰 WEALTHY: {username} - {total_value:,} R$ ({limiteds_count} limiteds)")
+            else:
+                self.log_message(f"👤 Processed: {username} - {total_value:,} R$")
             
             # Update leaderboard in real-time for any user (not just wealthy ones)
             self.root.after_idle(self.update_leaderboard_partial, user_info)
         else:
-            self.update_status(f"💰 Analyzing wealth... ({current}/{total} - {percentage}%)", progress)
+            self.update_status(f"🚀 High-speed processing... ({current}/{total} - {percentage}%)", progress)
     
     def extract_community_id(self, url: str) -> str:
         """Extract community ID from URL"""
