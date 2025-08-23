@@ -1,0 +1,15 @@
+Roblox Community Analyzer
+Version: 1.0.0
+Build Date: 2025-08-23 16:52:13
+Platform: Cross-platform (Linux/Windows/macOS)
+
+Changes in this version:
+- Initial release
+- Community member analysis
+- Wealth leaderboard based on limiteds
+- Discord server discovery
+- Modern GUI interface
+- Export functionality
+- Cross-platform support
+
+For updates and support, check the project repository.
