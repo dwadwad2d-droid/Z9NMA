@@ -374,7 +374,7 @@ class RobloxScraper:
         return wealth_data
     
     def _analyze_single_member(self, member: Dict, index: int) -> Optional[Dict]:
-        """Analyze a single member's wealth - optimized for speed"""
+        """Analyze a single member's wealth - optimized for speed with privacy detection"""
         try:
             user_id = member.get('user', {}).get('userId')
             username = member.get('user', {}).get('username')
@@ -382,26 +382,42 @@ class RobloxScraper:
             if not user_id or not username:
                 return None
             
-            # Get user's limiteds with faster method
-            limiteds = self._get_user_limiteds_fast(user_id)
+            # Get user's limiteds with privacy detection
+            limiteds, privacy_status = self._get_user_limiteds_fast(user_id)
             
             # Calculate total value
             total_value = 0
             limited_names = []
+            status_info = ""
             
-            for limited in limiteds:
-                # Try multiple value fields for better accuracy
-                value = (limited.get('recent_average_price', 0) or 
-                        limited.get('recentAveragePrice', 0) or
-                        limited.get('RecentAveragePrice', 0) or
-                        self._get_asset_value_fast(limited.get('id')))
+            if privacy_status == "private":
+                status_info = "🔒 Private Inventory"
+                total_value = -1  # Special indicator for private
+            elif privacy_status == "error":
+                status_info = "❌ Error Accessing Inventory"
+                total_value = -2  # Special indicator for error
+            elif privacy_status == "public_empty":
+                status_info = "📭 No Limiteds Found"
+                total_value = 0
+            else:  # public with limiteds
+                for limited in limiteds:
+                    # Try multiple value fields for better accuracy
+                    value = (limited.get('recent_average_price', 0) or 
+                            limited.get('recentAveragePrice', 0) or
+                            limited.get('RecentAveragePrice', 0) or
+                            self._get_asset_value_fast(limited.get('id')))
+                    
+                    if value and value > 0:
+                        total_value += value
+                        name = (limited.get('name') or 
+                               limited.get('Name') or 
+                               limited.get('assetName', 'Unknown Limited'))
+                        limited_names.append(name)
                 
-                if value and value > 0:
-                    total_value += value
-                    name = (limited.get('name') or 
-                           limited.get('Name') or 
-                           limited.get('assetName', 'Unknown Limited'))
-                    limited_names.append(name)
+                if total_value > 0:
+                    status_info = f"💰 {len(limited_names)} Limiteds Found"
+                else:
+                    status_info = "📭 No Valuable Limiteds"
             
             # Get user profile info
             profile_url = f"https://www.roblox.com/users/{user_id}/profile"
@@ -412,50 +428,136 @@ class RobloxScraper:
                 'total_value': total_value,
                 'limiteds': limited_names,
                 'limited_count': len(limiteds),
-                'profile_url': profile_url
+                'profile_url': profile_url,
+                'privacy_status': privacy_status,
+                'status_info': status_info
             }
             
         except Exception as e:
             print(f"Error in _analyze_single_member for {member}: {e}")
             return None
     
-    def _get_user_limiteds_fast(self, user_id: int) -> List[Dict]:
-        """Fast method to get user limiteds - prioritize speed over completeness"""
+    def _get_user_limiteds_fast(self, user_id: int) -> tuple:
+        """Fast method to get user limiteds with privacy detection"""
         try:
-            # Try the fastest endpoints first
+            # First check if inventory is viewable
+            privacy_status = self._check_inventory_privacy(user_id)
+            
+            if privacy_status == "private":
+                return [], "private"
+            elif privacy_status == "error":
+                return [], "error"
+            
+            # Try public inventory endpoints (no authentication needed)
             endpoints_priority = [
-                f"https://api.roblox.com/users/{user_id}/inventory/limited",
-                f"https://inventory.roblox.com/v1/users/{user_id}/assets/collectibles?limit=50",
-                f"https://economy.roblox.com/v2/users/{user_id}/transactions?transactionType=Sale&limit=10"
+                f"https://inventory.roblox.com/v1/users/{user_id}/assets/collectibles",
+                f"https://api.roblox.com/users/{user_id}/inventory",
+                f"https://www.roblox.com/users/inventory/list-json?userId={user_id}&assetTypeId=8&itemsPerPage=100"
             ]
             
             for endpoint in endpoints_priority:
                 try:
-                    if "inventory/limited" in endpoint:
+                    if "collectibles" in endpoint:
+                        # Use public collectibles endpoint
+                        response = self._make_request(endpoint, params={'limit': 50, 'sortOrder': 'Desc'})
+                        if response and response.get('data'):
+                            limiteds = self._parse_collectible_items(response['data'])
+                            if limiteds:
+                                return limiteds, "public"
+                    
+                    elif "inventory" in endpoint and "api.roblox.com" in endpoint:
+                        # Legacy public API
                         response = self._make_request(endpoint)
                         if response:
-                            items = response if isinstance(response, list) else response.get('data', [])
-                            if items:
-                                return self._parse_limited_items(items)
+                            limiteds = self._parse_legacy_inventory(response)
+                            if limiteds:
+                                return limiteds, "public"
                     
-                    elif "collectibles" in endpoint:
+                    elif "list-json" in endpoint:
+                        # Website API for public inventories
                         response = self._make_request(endpoint)
-                        if response and response.get('data'):
-                            return self._parse_collectible_items(response['data'])
-                    
-                    elif "transactions" in endpoint:
-                        # Try to get from transaction history as backup
-                        response = self._make_request(endpoint)
-                        if response and response.get('data'):
-                            return self._parse_transaction_items(response['data'])
+                        if response and response.get('Data'):
+                            limiteds = self._parse_web_inventory(response['Data'])
+                            if limiteds:
+                                return limiteds, "public"
                             
-                except Exception:
+                except Exception as e:
+                    print(f"Error with endpoint {endpoint}: {e}")
                     continue
             
-            return []
+            # No limiteds found in public inventory
+            return [], "public_empty"
             
         except Exception as e:
-            return []
+            print(f"Error getting user limiteds: {e}")
+            return [], "error"
+    
+    def _check_inventory_privacy(self, user_id: int) -> str:
+        """Check if user's inventory is public or private"""
+        try:
+            # Check inventory privacy status
+            url = f"https://inventory.roblox.com/v1/users/{user_id}/can-view-inventory"
+            response = self._make_request(url)
+            
+            if response and isinstance(response, dict):
+                can_view = response.get('canView', False)
+                return "public" if can_view else "private"
+            
+            # Fallback: Try to access inventory directly
+            test_url = f"https://inventory.roblox.com/v1/users/{user_id}/assets/collectibles"
+            test_response = self._make_request(test_url, params={'limit': 1})
+            
+            if test_response is None:
+                return "private"
+            elif test_response.get('errors'):
+                error_code = test_response.get('errors', [{}])[0].get('code', 0)
+                if error_code == 1:  # Unauthorized
+                    return "private"
+            
+            return "public"
+            
+        except Exception as e:
+            print(f"Error checking inventory privacy: {e}")
+            return "error"
+    
+    def _parse_legacy_inventory(self, response) -> List[Dict]:
+        """Parse legacy inventory API response"""
+        limiteds = []
+        try:
+            items = response if isinstance(response, list) else response.get('Data', [])
+            
+            for item in items[:20]:  # Limit for speed
+                if item.get('IsLimited') or item.get('IsLimitedUnique'):
+                    limiteds.append({
+                        'id': item.get('AssetId'),
+                        'name': item.get('Name'),
+                        'recent_average_price': item.get('RecentAveragePrice', 0),
+                        'user_asset_id': item.get('UserAssetId'),
+                        'is_limited': True
+                    })
+        except Exception as e:
+            print(f"Error parsing legacy inventory: {e}")
+        
+        return limiteds
+    
+    def _parse_web_inventory(self, items) -> List[Dict]:
+        """Parse web inventory API response"""
+        limiteds = []
+        try:
+            for item in items[:20]:  # Limit for speed
+                asset_details = item.get('Item', {})
+                if asset_details.get('IsLimited') or asset_details.get('IsLimitedUnique'):
+                    limiteds.append({
+                        'id': asset_details.get('AssetId'),
+                        'name': asset_details.get('Name'),
+                        'recent_average_price': item.get('Product', {}).get('PriceInRobux', 0),
+                        'user_asset_id': item.get('UserAssetId'),
+                        'is_limited': True
+                    })
+        except Exception as e:
+            print(f"Error parsing web inventory: {e}")
+        
+        return limiteds
     
     def _parse_limited_items(self, items: List[Dict]) -> List[Dict]:
         """Parse limited items from API response"""

@@ -306,8 +306,16 @@ class RobloxCommunityAnalyzer:
             
             analysis_time = end_time - start_time
             members_analyzed = len(wealth_data)
+            
+            # Calculate privacy statistics
+            private_count = len([m for m in wealth_data if m.get('total_value') == -1])
+            error_count = len([m for m in wealth_data if m.get('total_value') == -2])
+            public_with_limiteds = len([m for m in wealth_data if m.get('total_value', 0) > 0])
+            public_no_limiteds = len([m for m in wealth_data if m.get('total_value', 0) == 0])
+            
             self.log_message(f"⚡ Analysis completed in {analysis_time:.2f} seconds")
             self.log_message(f"📊 Analyzed {members_analyzed} members ({members_analyzed/analysis_time:.1f} members/second)")
+            self.log_message(f"🔒 Privacy Stats: {private_count} private, {error_count} errors, {public_with_limiteds} with limiteds, {public_no_limiteds} public empty")
             
             # Create leaderboard
             self.update_status("📊 Creating wealth leaderboard...", 0.8)
@@ -367,15 +375,21 @@ class RobloxCommunityAnalyzer:
             username = user_info.get('username', 'Unknown')
             total_value = user_info.get('total_value', 0)
             limiteds_count = len(user_info.get('limiteds', []))
+            privacy_status = user_info.get('privacy_status', 'unknown')
+            status_info = user_info.get('status_info', '')
             
             # Show high-speed processing status
             self.update_status(f"🚀 Processed {username}... ({current}/{total} - {percentage}%) [CONCURRENT]", progress)
             
-            # Log users with wealth
-            if total_value > 0:
+            # Log users with different statuses
+            if total_value == -1:  # Private inventory
+                self.log_message(f"🔒 PRIVATE: {username} - Inventory is private")
+            elif total_value == -2:  # Error accessing
+                self.log_message(f"❌ ERROR: {username} - Could not access inventory")
+            elif total_value > 0:  # Has limiteds
                 self.log_message(f"💰 WEALTHY: {username} - {total_value:,} R$ ({limiteds_count} limiteds)")
-            else:
-                self.log_message(f"👤 Processed: {username} - {total_value:,} R$")
+            else:  # Public but no limiteds
+                self.log_message(f"📭 PUBLIC: {username} - No valuable limiteds found")
             
             # Update leaderboard in real-time for any user (not just wealthy ones)
             self.root.after_idle(self.update_leaderboard_partial, user_info)
@@ -391,8 +405,11 @@ class RobloxCommunityAnalyzer:
         raise ValueError("Could not extract community ID from URL")
     
     def create_leaderboard(self, wealth_data: List[Dict]) -> List[Dict]:
-        """Create sorted wealth leaderboard"""
-        sorted_members = sorted(wealth_data, key=lambda x: x['total_value'], reverse=True)
+        """Create sorted wealth leaderboard filtering out negative values (private/error)"""
+        # Filter to only include valid wealth values (>= 0)
+        valid_wealth = [member for member in wealth_data if member.get('total_value', 0) >= 0]
+        # Sort by wealth descending
+        sorted_members = sorted(valid_wealth, key=lambda x: x['total_value'], reverse=True)
         return sorted_members[:50]  # Top 50
     
     def display_community_info(self, info: Dict):
@@ -457,21 +474,26 @@ Social Links:
             # If this is the first analysis entry, create header
             if "🏆 ANALYSIS IN PROGRESS" not in current_text:
                 header = "🏆 ANALYSIS IN PROGRESS (Live Updates)\n" + "="*60 + "\n"
-                header += "Users are being analyzed in real-time. Wealthy users will appear here:\n\n"
+                header += "Users are being analyzed in real-time with privacy detection:\n\n"
                 self.leaderboard_text.delete("1.0", "end")
                 self.leaderboard_text.insert("1.0", header)
             
-            # Add new user info (show all users with details)
+            # Add new user info with privacy status
             total_value = user_info.get('total_value', 0)
             limiteds_count = len(user_info.get('limiteds', []))
+            status_info = user_info.get('status_info', '')
             
-            # Show user with wealth indicator
-            if total_value > 0:
+            # Show user with appropriate status indicator
+            if total_value == -1:  # Private inventory
+                user_line = f"🔒 {user_info['username']:<20} | {'PRIVATE':>15} | Inventory Hidden\n"
+            elif total_value == -2:  # Error accessing
+                user_line = f"❌ {user_info['username']:<20} | {'ERROR':>15} | Access Failed\n"
+            elif total_value > 0:  # Has limiteds
                 user_line = f"💰 {user_info['username']:<20} | {total_value:>10,} R$ | {limiteds_count:>3} limiteds\n"
                 if user_info.get('limiteds'):
                     user_line += f"     📦 Items: {', '.join(user_info['limiteds'][:3])}\n"
-            else:
-                user_line = f"👤 {user_info['username']:<20} | {total_value:>10,} R$ | {limiteds_count:>3} limiteds\n"
+            else:  # Public but no limiteds
+                user_line = f"📭 {user_info['username']:<20} | {'NO LIMITEDS':>15} | Public Inventory\n"
             
             if user_info.get('profile_url'):
                 user_line += f"     🔗 Profile: {user_info['profile_url']}\n"
