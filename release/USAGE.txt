@@ -1,0 +1,37 @@
+ROBLOX COMMUNITY ANALYZER - USAGE INSTRUCTIONS
+
+QUICK START:
+1. Run the application (double-click RobloxCommunityAnalyzer)
+2. Get your Roblox cookie:
+   - Open browser, go to roblox.com and login
+   - Press F12, go to Application > Cookies > .ROBLOSECURITY
+   - Copy the cookie value and paste in the app
+3. Enter community URL (e.g., https://www.roblox.com/communities/12345/CommunityName#!/about)
+4. Click "Analyze Community" and wait for results
+
+INSTALLATION:
+- Linux/Mac: Run ./install.sh
+- Windows: Run install.bat as administrator
+- Or run the executable directly
+
+SYSTEM REQUIREMENTS:
+- Operating System: Windows 10+, Linux, macOS
+- Internet connection required
+- Valid Roblox account
+
+FEATURES:
+- Wealth Leaderboard: Ranks members by limited items value
+- Discord Integration: Finds community Discord servers
+- Export Results: Save analysis as JSON file
+- Modern UI: Clean interface with progress tracking
+
+TROUBLESHOOTING:
+- If "Invalid cookie" error: Get fresh cookie from browser
+- If slow analysis: Large communities take time due to rate limiting
+- If app won't start: Check internet connection and firewall
+
+For more information, see README.md
+
+DISCLAIMER:
+This tool is for educational purposes. Use responsibly and respect
+Roblox Terms of Service and Discord Terms of Service.
