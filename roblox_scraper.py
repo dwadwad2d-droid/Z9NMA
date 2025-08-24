@@ -124,12 +124,25 @@ class RobloxScraper:
         except Exception as e:
             raise Exception(f"Failed to get community info: {e}")
     
-    def get_community_members(self, community_id: str, max_members: int = 1000) -> List[Dict]:
-        """Get community members with pagination"""
+    def get_community_members(self, community_id: str, rank_filter: str = "all", max_members: int = 2000) -> List[Dict]:
+        """Get community members with pagination and rank filtering"""
         members = []
         cursor = ""
         
         try:
+            # Get group roles first to identify lowest rank
+            roles_url = f"https://groups.roblox.com/v1/groups/{community_id}/roles"
+            roles_response = self._make_request(roles_url)
+            
+            lowest_rank_id = None
+            if roles_response and 'roles' in roles_response:
+                # Find the lowest rank (highest rank number, lowest priority)
+                roles = roles_response['roles']
+                if roles:
+                    lowest_rank = max(roles, key=lambda x: x.get('rank', 0))
+                    lowest_rank_id = lowest_rank.get('id')
+                    print(f"Lowest rank: {lowest_rank.get('name')} (ID: {lowest_rank_id})")
+            
             while len(members) < max_members:
                 url = f"https://groups.roblox.com/v1/groups/{community_id}/users"
                 params = {
@@ -149,7 +162,15 @@ class RobloxScraper:
                 if not batch_members:
                     break
                 
-                members.extend(batch_members)
+                # Filter by rank if requested
+                if rank_filter == "lowest" and lowest_rank_id:
+                    filtered_members = [
+                        member for member in batch_members 
+                        if member.get('role', {}).get('id') == lowest_rank_id
+                    ]
+                    members.extend(filtered_members)
+                else:
+                    members.extend(batch_members)
                 
                 cursor = response.get('nextPageCursor')
                 if not cursor:

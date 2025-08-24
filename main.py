@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Tuple
 
 from roblox_scraper import RobloxScraper
 from discord_finder import DiscordFinder
+from discord_bot import RobloxDiscordBot, create_discord_bot_session
 from ui_components import ModernComponents
 
 # Set appearance mode and color theme
@@ -96,6 +97,21 @@ class RobloxCommunityAnalyzer:
         )
         self.url_entry.pack(fill="x", padx=20, pady=(0, 20))
         
+        # Rank filter option
+        rank_label = ctk.CTkLabel(input_frame, text="🎯 Rank Filter (Optional):", font=ctk.CTkFont(size=14, weight="bold"))
+        rank_label.pack(anchor="w", padx=20, pady=(10, 5))
+        
+        self.rank_filter_var = ctk.StringVar(value="all")
+        rank_frame = ctk.CTkFrame(input_frame, fg_color="transparent")
+        rank_frame.pack(fill="x", padx=20, pady=(0, 10))
+        
+        # Radio buttons for rank filtering
+        self.rank_all_radio = ctk.CTkRadioButton(rank_frame, text="All Ranks", variable=self.rank_filter_var, value="all")
+        self.rank_all_radio.pack(side="left", padx=(0, 20))
+        
+        self.rank_lowest_radio = ctk.CTkRadioButton(rank_frame, text="Lowest Rank Only", variable=self.rank_filter_var, value="lowest")
+        self.rank_lowest_radio.pack(side="left")
+        
         # Help text
         help_text = ctk.CTkLabel(
             input_frame,
@@ -103,7 +119,7 @@ class RobloxCommunityAnalyzer:
             font=ctk.CTkFont(size=11),
             text_color="gray"
         )
-        help_text.pack(anchor="w", padx=20, pady=(0, 20))
+        help_text.pack(anchor="w", padx=20, pady=(10, 20))
     
     def setup_control_section(self):
         """Setup control buttons"""
@@ -172,6 +188,29 @@ class RobloxCommunityAnalyzer:
             font=ctk.CTkFont(family="Consolas", size=12)
         )
         self.discord_text.pack(fill="both", expand=True)
+        
+        # Advanced Discord Bot tab
+        self.tabview.add("🤖 Discord Bot")
+        discord_bot_frame = self.tabview.tab("🤖 Discord Bot")
+        
+        # Bot token input
+        bot_token_label = ctk.CTkLabel(discord_bot_frame, text="Discord Bot Token (Optional):", font=ctk.CTkFont(size=12, weight="bold"))
+        bot_token_label.pack(anchor="w", padx=10, pady=(10, 5))
+        
+        self.bot_token_entry = ctk.CTkEntry(
+            discord_bot_frame,
+            placeholder_text="Enter Discord bot token for advanced matching...",
+            show="*",
+            font=ctk.CTkFont(size=11)
+        )
+        self.bot_token_entry.pack(fill="x", padx=10, pady=(0, 10))
+        
+        # Bot results area
+        self.bot_results_text = ctk.CTkTextbox(
+            discord_bot_frame,
+            font=ctk.CTkFont(family="Consolas", size=11)
+        )
+        self.bot_results_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
         # Community info tab
         self.tabview.add("ℹ️ Community Info")
@@ -287,10 +326,15 @@ class RobloxCommunityAnalyzer:
             community_info = self.scraper.get_community_info(community_id)
             self.display_community_info(community_info)
             
-            # Get community members
+            # Get community members with rank filtering
             self.update_status("👥 Fetching community members...", 0.4)
-            members = self.scraper.get_community_members(community_id)
-            self.log_message(f"Found {len(members)} community members")
+            rank_filter = self.rank_filter_var.get()
+            members = self.scraper.get_community_members(community_id, rank_filter)
+            
+            if rank_filter == "lowest":
+                self.log_message(f"Found {len(members)} members (filtered to lowest rank only)")
+            else:
+                self.log_message(f"Found {len(members)} community members (all ranks)")
             
             # Display member list immediately
             self.display_member_list(members)
@@ -333,13 +377,32 @@ class RobloxCommunityAnalyzer:
                 self.discord_text.delete("1.0", "end")
                 self.discord_text.insert("1.0", f"🔍 Discord server found: {invite_url}\n\nSearching for user matches...\n\n")
                 
-                # Match Discord users
+                # Basic Discord matching (profile-based)
                 discord_matches = self.discord_finder.match_discord_users(wealth_data, discord_info)
                 self.display_discord_matches(discord_matches)
+                
+                # Advanced Discord bot matching (if token provided)
+                bot_token = self.bot_token_entry.get().strip()
+                if bot_token and bot_token != "":
+                    self.log_message("🤖 Starting advanced Discord bot analysis...")
+                    self.run_discord_bot_analysis(invite_url, wealth_data, bot_token)
+                else:
+                    self.bot_results_text.delete("1.0", "end")
+                    self.bot_results_text.insert("1.0", "🤖 Advanced Discord Bot Analysis\n" + "="*40 + "\n\n")
+                    self.bot_results_text.insert("end", "To enable advanced Discord matching:\n")
+                    self.bot_results_text.insert("end", "1. Create a Discord bot at https://discord.com/developers/applications\n")
+                    self.bot_results_text.insert("end", "2. Get the bot token\n")
+                    self.bot_results_text.insert("end", "3. Enter the token above\n")
+                    self.bot_results_text.insert("end", "4. Invite the bot to the target Discord server\n\n")
+                    self.bot_results_text.insert("end", "The bot will then match Discord members with Roblox users automatically.")
+                    
             else:
                 self.log_message("No Discord server found in community social links")
                 self.discord_text.delete("1.0", "end")
                 self.discord_text.insert("1.0", "❌ No Discord server found in community social links.\n\nChecked:\n- Community description\n- Social media links\n- Community details\n\nNo Discord invite links were discovered.")
+                
+                self.bot_results_text.delete("1.0", "end")
+                self.bot_results_text.insert("1.0", "❌ No Discord server found to analyze with bot.")
             
             self.update_status("✅ Analysis completed successfully!", 1.0)
             self.log_message("Analysis completed successfully")
@@ -410,7 +473,7 @@ class RobloxCommunityAnalyzer:
         valid_wealth = [member for member in wealth_data if member.get('total_value', 0) >= 0]
         # Sort by wealth descending
         sorted_members = sorted(valid_wealth, key=lambda x: x['total_value'], reverse=True)
-        return sorted_members[:50]  # Top 50
+        return sorted_members  # Return ALL members, no limit
     
     def display_community_info(self, info: Dict):
         """Display community information"""
@@ -452,15 +515,26 @@ Social Links:
         self.leaderboard_text.insert("1.0", text)
     
     def display_leaderboard(self, leaderboard: List[Dict]):
-        """Display wealth leaderboard"""
-        text = "🏆 WEALTH LEADERBOARD (Top 50)\n" + "="*60 + "\n\n"
+        """Display wealth leaderboard - ALL users, no limit"""
+        text = f"🏆 COMPLETE WEALTH LEADERBOARD ({len(leaderboard)} Users)\n" + "="*60 + "\n\n"
         
         for i, member in enumerate(leaderboard, 1):
-            text += f"{i:2d}. {member['username']:<20} | {member['total_value']:>10,} R$ | {len(member['limiteds']):>3} limiteds\n"
+            # Add wealth indicator icons
+            if member['total_value'] > 100000:
+                icon = "💎"  # Super wealthy
+            elif member['total_value'] > 10000:
+                icon = "💰"  # Wealthy
+            elif member['total_value'] > 1000:
+                icon = "🪙"   # Some wealth
+            else:
+                icon = "📭"   # No/low wealth
+            
+            text += f"{i:3d}. {icon} {member['username']:<20} | {member['total_value']:>10,} R$ | {len(member['limiteds']):>3} limiteds\n"
+            
             if member.get('profile_url'):
-                text += f"     Profile: {member['profile_url']}\n"
+                text += f"      Profile: {member['profile_url']}\n"
             if member['limiteds']:
-                text += f"     Top Items: {', '.join(member['limiteds'][:3])}\n"
+                text += f"      Top Items: {', '.join(member['limiteds'][:3])}\n"
             text += "\n"
         
         self.leaderboard_text.delete("1.0", "end")
@@ -535,6 +609,80 @@ Social Links:
         # Stop the scraper if it exists
         if self.scraper:
             self.scraper.stop_analysis = True
+    
+    def run_discord_bot_analysis(self, invite_url: str, wealth_data: List[Dict], bot_token: str):
+        """Run Discord bot analysis in a separate thread"""
+        def bot_analysis():
+            try:
+                self.bot_results_text.delete("1.0", "end")
+                self.bot_results_text.insert("1.0", "🤖 Starting Discord Bot Analysis...\n" + "="*40 + "\n\n")
+                self.bot_results_text.insert("end", f"Target Server: {invite_url}\n")
+                self.bot_results_text.insert("end", f"Roblox Users to Match: {len(wealth_data)}\n\n")
+                
+                # Create and run bot analysis
+                import asyncio
+                
+                async def run_bot():
+                    bot, matches = await create_discord_bot_session(invite_url, wealth_data)
+                    return bot, matches
+                
+                # Run the async function
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    bot, matches = loop.run_until_complete(run_bot())
+                    loop.close()
+                    
+                    # Display results
+                    self.root.after(0, lambda: self.display_bot_results(matches, bot))
+                    
+                except Exception as e:
+                    error_msg = f"❌ Discord bot error: {str(e)}\n\n"
+                    error_msg += "Common issues:\n"
+                    error_msg += "- Invalid bot token\n"
+                    error_msg += "- Bot not invited to server\n"
+                    error_msg += "- Missing permissions\n"
+                    self.root.after(0, lambda: self.bot_results_text.insert("end", error_msg))
+                    
+            except Exception as e:
+                error_msg = f"❌ Failed to start Discord bot: {str(e)}"
+                self.root.after(0, lambda: self.bot_results_text.insert("end", error_msg))
+        
+        # Run in background thread
+        bot_thread = threading.Thread(target=bot_analysis)
+        bot_thread.daemon = True
+        bot_thread.start()
+    
+    def display_bot_results(self, matches: List[Dict], bot):
+        """Display Discord bot matching results"""
+        try:
+            self.bot_results_text.insert("end", f"🎉 Bot Analysis Complete!\n")
+            self.bot_results_text.insert("end", f"Found {len(matches)} potential matches:\n\n")
+            
+            if matches:
+                for i, match in enumerate(matches, 1):
+                    discord_user = match['discord_user']
+                    roblox_user = match['roblox_user']
+                    
+                    self.bot_results_text.insert("end", f"{i:2d}. Discord: {discord_user['username']} ({discord_user['display_name']})\n")
+                    self.bot_results_text.insert("end", f"    Roblox: {roblox_user['username']}\n")
+                    self.bot_results_text.insert("end", f"    Confidence: {match['match_confidence']}\n")
+                    self.bot_results_text.insert("end", f"    Method: {match['match_method']}\n")
+                    
+                    if 'similarity' in roblox_user:
+                        self.bot_results_text.insert("end", f"    Similarity: {roblox_user['similarity']:.2%}\n")
+                    
+                    self.bot_results_text.insert("end", "\n")
+            else:
+                self.bot_results_text.insert("end", "No matches found. This could mean:\n")
+                self.bot_results_text.insert("end", "- Different usernames on Discord vs Roblox\n")
+                self.bot_results_text.insert("end", "- Users not in the Discord server\n")
+                self.bot_results_text.insert("end", "- Bot lacks permission to see members\n")
+            
+            self.bot_results_text.see("end")
+            
+        except Exception as e:
+            self.log_message(f"Error displaying bot results: {e}", "ERROR")
     
     def export_results(self):
         """Export analysis results to JSON"""
